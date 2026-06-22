@@ -1,0 +1,1 @@
+export default function Home() { return <section className="card"><h1>Invoices without the friction.</h1><p>Billora helps businesses manage customers, issue invoices, and keep payment status clear.</p></section>; }

@@ -1,0 +1,11 @@
+{
+  "name": "billora",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/api", "apps/web", "packages/shared"],
+  "scripts": {
+    "dev:api": "npm run start:dev -w @billora/api",
+    "dev:web": "npm run dev -w @billora/web",
+    "build": "npm run build --workspaces --if-present"
+  }
+}
