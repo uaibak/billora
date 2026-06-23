@@ -32,14 +32,14 @@ cp apps/api/.env.example apps/api/.env
 Create the development role and database as a PostgreSQL administrator:
 
 ```sql
-CREATE USER billora_app WITH PASSWORD 'YOUR_PASSWORD';
-CREATE DATABASE billora_db OWNER billora_app;
+CREATE USER billora_user WITH PASSWORD 'YOUR_PASSWORD';
+CREATE DATABASE billora_db OWNER billora_user;
 ```
 
 Set a real password and JWT secret in `apps/api/.env`:
 
 ```env
-DATABASE_URL="postgresql://billora_app:YOUR_PASSWORD@localhost:5432/billora_db"
+DATABASE_URL="postgresql://billora_user:YOUR_PASSWORD@localhost:5432/billora_db"
 JWT_SECRET="replace_with_strong_secret"
 JWT_EXPIRES_IN="7d"
 PORT=3001
