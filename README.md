@@ -1,21 +1,21 @@
 # Billora
 
-Billora is a SaaS invoicing foundation for business profiles, customers, invoices, and manual payment tracking. This MVP contains a working NestJS API, a basic Next.js shell, shared TypeScript contracts, and a reserved Flutter workspace.
+Billora is a SaaS invoicing foundation for business profiles, customers, invoices, and manual payment tracking. It contains a working NestJS API, a Next.js web app, shared TypeScript contracts, and a reserved Flutter workspace.
 
 ## Stack
 
 - NestJS, TypeScript, JWT/Passport, bcrypt
 - PostgreSQL (`billora_db`) and Prisma
 - Next.js and React
-- Flutter workspace placeholder
+- Flutter workspace
 - npm workspaces
 
 ## Structure
 
 ```text
 apps/api       NestJS API and Prisma schema
-apps/web       Next.js placeholder application
-apps/mobile    Future Flutter application
+apps/web       Next.js web application
+apps/mobile    Flutter application workspace
 packages/shared Shared TypeScript contracts
 docs           Architecture notes
 ```
@@ -53,7 +53,7 @@ npm run prisma:migrate -w @billora/api -- --name init
 npm run seed -w @billora/api
 ```
 
-Demo credentials: `demo@billora.app` / `Password123!`.
+Test credentials: `demo@billora.app` / `Password123!`.
 
 ## Run
 

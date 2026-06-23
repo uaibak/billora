@@ -6,12 +6,12 @@ const prisma = new PrismaClient();
 async function main() {
   const user = await prisma.user.upsert({
     where: { email: 'demo@billora.app' },
-    update: { fullName: 'Billora Demo', passwordHash: await bcrypt.hash('Password123!', 12) },
-    create: { email: 'demo@billora.app', fullName: 'Billora Demo', passwordHash: await bcrypt.hash('Password123!', 12) },
+    update: { fullName: 'Billora User', passwordHash: await bcrypt.hash('Password123!', 12) },
+    create: { email: 'demo@billora.app', fullName: 'Billora User', passwordHash: await bcrypt.hash('Password123!', 12) },
   });
   await prisma.business.deleteMany({ where: { userId: user.id } });
   const business = await prisma.business.create({ data: {
-    userId: user.id, name: 'Billora Demo Studio', email: 'billing@billora.app',
+    userId: user.id, name: 'Billora Studio', email: 'billing@billora.app',
     phone: '+92 300 0000000', city: 'Karachi', country: 'Pakistan', taxNumber: 'DEMO-TAX-001',
   } });
   const [acme, northstar] = await Promise.all([
@@ -37,7 +37,7 @@ async function main() {
     invoiceId: first.id, amount: 500, provider: PaymentProvider.MANUAL, status: PaymentStatus.SUCCESS,
     providerReference: 'DEMO-CASH-001', paidAt: new Date('2026-06-10'),
   } });
-  console.log('Seeded demo@billora.app / Password123!');
+  console.log('Seeded test user: demo@billora.app / Password123!');
 }
 
 main().catch((error) => { console.error(error); process.exit(1); }).finally(() => prisma.$disconnect());
