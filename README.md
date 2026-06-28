@@ -43,6 +43,17 @@ DATABASE_URL="postgresql://billora_user:YOUR_PASSWORD@localhost:5432/billora_db"
 JWT_SECRET="replace_with_strong_secret"
 JWT_EXPIRES_IN="7d"
 PORT=3001
+# Optional for background jobs:
+# REDIS_URL="redis://localhost:6379"
+# Optional for invoice PDF/email delivery:
+INVOICE_STORAGE_DIR="storage/invoices"
+WEB_APP_URL="http://localhost:3000"
+# SMTP_HOST="smtp.example.com"
+# SMTP_PORT=587
+# SMTP_SECURE=false
+# SMTP_USER="user"
+# SMTP_PASS="password"
+# MAIL_FROM="billing@billora.app"
 ```
 
 Initialize and seed the database:
@@ -63,23 +74,71 @@ npm run dev:web   # http://localhost:3000
 ```
 
 Build everything with `npm run build`. Prisma Studio is available with `npm run prisma:studio -w @billora/api`.
+Background jobs use BullMQ. Configure `REDIS_URL` to enable queueing; without it, queue requests are skipped gracefully for local development. Invoice PDF artifacts are written to `INVOICE_STORAGE_DIR`; email delivery uses SMTP settings when configured and simulates success locally when SMTP is omitted.
+
+Run tests:
+
+```bash
+npm run test:e2e -w @billora/api
+npm run test -w @billora/web
+```
+
+Health and lightweight API docs:
+
+```text
+GET /health
+GET /docs
+GET /docs/openapi.json
+```
+
+The API also applies basic security headers, request IDs, request logging, and configurable rate limiting:
+
+```env
+RATE_LIMIT_MAX=240
+RATE_LIMIT_WINDOW_MS=60000
+```
 
 ## API
 
 All endpoints except registration and login require `Authorization: Bearer <token>`.
+List endpoints for businesses, customers, invoices, and invoice payments support pagination and filtering:
+
+```text
+?page=1&limit=20&search=acme&organizationId=...&businessId=...
+```
+
+Invoices also support `status` and `customerId`; invoice payments also support `status` and `provider`.
+Audit logs require `organizationId` and support `action`, `entityType`, `entityId`, `search`, `dateFrom`, and `dateTo`. CSV export is available at `/audit-logs/export`.
+Paginated responses use:
+
+```ts
+{ data: [], meta: { page, limit, total, totalPages } }
+```
 
 | Method | Endpoint |
 | --- | --- |
 | POST | `/auth/register` |
 | POST | `/auth/login` |
+| POST | `/auth/logout` |
 | GET | `/auth/me`, `/users/me` |
+| POST, GET | `/organizations` |
+| PUT | `/organizations/:id` |
+| GET | `/organizations/:id/members` |
+| POST, GET | `/organizations/:id/invites` |
+| POST | `/organizations/:id/invites/:inviteId/resend` |
+| DELETE | `/organizations/:id/invites/:inviteId` |
+| POST | `/organizations/invites/accept` |
+| GET | `/dashboard/summary` |
+| GET | `/audit-logs`, `/audit-logs/export` |
 | POST, GET | `/businesses` |
 | GET, PUT, DELETE | `/businesses/:id` |
+| POST | `/businesses/:id/logo` |
 | POST, GET | `/customers` |
 | GET, PUT, DELETE | `/customers/:id` |
 | POST, GET | `/invoices` |
 | GET, PUT, DELETE | `/invoices/:id` |
 | POST | `/invoices/:id/send` |
+| POST, GET | `/invoices/:id/pdf` |
 | POST | `/invoices/:id/mark-paid` |
 | POST | `/payments/manual` |
 | GET | `/payments/invoice/:invoiceId` |
@@ -94,9 +153,9 @@ curl http://localhost:3001/auth/me -H 'Authorization: Bearer YOUR_TOKEN'
 
 ## Roadmap
 
-1. Add API integration and protected sessions to the web app.
-2. Add email templates and queued invoice delivery.
-3. Add PDF generation, recurring invoices, and audit history.
-4. Integrate Stripe, PayPal, and regional payment providers with webhooks.
-5. Add automated API tests, observability, rate limiting, and production deployment.
+1. Expand role management and invite acceptance UX.
+2. Add full web test coverage and broader API e2e coverage.
+3. Improve PDF rendering and document templates.
+4. Add dashboard charts and deeper analytics.
+5. Add production deployment assets when ready.
 6. Initialize the Flutter client and reuse versioned API contracts.

@@ -12,6 +12,19 @@ enum UserRole {
   ADMIN
 }
 
+enum OrganizationMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum OrganizationInviteStatus {
+  PENDING
+  ACCEPTED
+  CANCELLED
+  EXPIRED
+}
+
 enum InvoiceStatus {
   DRAFT
   SENT
@@ -37,36 +50,140 @@ enum PaymentProvider {
   EASYPAYSA
 }
 
+enum InvoiceDeliveryStatus {
+  NOT_SENT
+  QUEUED
+  SENT
+  FAILED
+}
+
+enum InvoicePdfStatus {
+  NOT_GENERATED
+  QUEUED
+  GENERATED
+  FAILED
+}
+
+enum AuditAction {
+  ORGANIZATION_CREATED
+  ORGANIZATION_UPDATED
+  BUSINESS_CREATED
+  BUSINESS_UPDATED
+  BUSINESS_DELETED
+  CUSTOMER_CREATED
+  CUSTOMER_UPDATED
+  CUSTOMER_DELETED
+  INVOICE_CREATED
+  INVOICE_UPDATED
+  INVOICE_DELETED
+  INVOICE_SENT
+  INVOICE_MARKED_PAID
+  INVOICE_PDF_QUEUED
+  INVOICE_PDF_GENERATED
+  INVOICE_EMAIL_QUEUED
+  INVOICE_EMAIL_SENT
+  INVOICE_EMAIL_FAILED
+  PAYMENT_RECORDED
+  ORGANIZATION_INVITE_CREATED
+  ORGANIZATION_INVITE_RESENT
+  ORGANIZATION_INVITE_ACCEPTED
+  ORGANIZATION_INVITE_CANCELLED
+}
+
+enum AuditEntityType {
+  ORGANIZATION
+  BUSINESS
+  CUSTOMER
+  INVOICE
+  PAYMENT
+}
+
 model User {
-  id           String     @id @default(uuid())
-  email        String     @unique
-  passwordHash String
-  fullName     String
-  phone        String?
-  role         UserRole   @default(USER)
-  businesses   Business[]
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id                 String               @id @default(uuid())
+  email              String               @unique
+  passwordHash       String
+  fullName           String
+  phone              String?
+  role               UserRole             @default(USER)
+  ownedOrganizations Organization[]        @relation("OrganizationOwner")
+  memberships        OrganizationMember[]
+  invitesSent        OrganizationInvite[] @relation("InvitesSent")
+  invitesAccepted    OrganizationInvite[] @relation("InvitesAccepted")
+  auditLogs          AuditLog[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+}
+
+model Organization {
+  id         String               @id @default(uuid())
+  ownerId    String
+  owner      User                 @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  name       String
+  slug       String               @unique
+  members    OrganizationMember[]
+  invites    OrganizationInvite[]
+  businesses Business[]
+  auditLogs  AuditLog[]
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  @@index([ownerId])
+}
+
+model OrganizationInvite {
+  id             String                   @id @default(uuid())
+  organizationId String
+  organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           OrganizationMemberRole    @default(MEMBER)
+  token          String                   @unique
+  status         OrganizationInviteStatus @default(PENDING)
+  invitedById    String
+  invitedBy      User                     @relation("InvitesSent", fields: [invitedById], references: [id], onDelete: Cascade)
+  acceptedById   String?
+  acceptedBy     User?                    @relation("InvitesAccepted", fields: [acceptedById], references: [id], onDelete: SetNull)
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  cancelledAt    DateTime?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  @@index([organizationId, status])
+  @@index([email])
+}
+
+model OrganizationMember {
+  id             String                 @id @default(uuid())
+  organizationId String
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           OrganizationMemberRole @default(MEMBER)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@unique([organizationId, userId])
+  @@index([userId])
 }
 
 model Business {
-  id        String     @id @default(uuid())
-  userId    String
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String
-  email     String?
-  phone     String?
-  address   String?
-  city      String?
-  country   String?
-  taxNumber String?
-  logoUrl   String?
-  customers Customer[]
-  invoices  Invoice[]
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  email          String?
+  phone          String?
+  address        String?
+  city           String?
+  country        String?
+  taxNumber      String?
+  logoUrl        String?
+  customers      Customer[]
+  invoices       Invoice[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  @@index([userId])
+  @@index([organizationId])
 }
 
 model Customer {
@@ -101,6 +218,13 @@ model Invoice {
   discountAmount Decimal       @default(0) @db.Decimal(12, 2)
   totalAmount    Decimal       @db.Decimal(12, 2)
   notes          String?
+  publicToken    String                @unique @default(uuid())
+  pdfStatus      InvoicePdfStatus      @default(NOT_GENERATED)
+  pdfPath        String?
+  pdfGeneratedAt DateTime?
+  emailStatus    InvoiceDeliveryStatus @default(NOT_SENT)
+  emailedAt      DateTime?
+  lastEmailError String?
   items          InvoiceItem[]
   payments       Payment[]
   createdAt      DateTime      @default(now())
@@ -108,6 +232,7 @@ model Invoice {
 
   @@index([businessId])
   @@index([customerId])
+  @@index([publicToken])
 }
 
 model InvoiceItem {
@@ -138,4 +263,21 @@ model Payment {
   updatedAt         DateTime        @updatedAt
 
   @@index([invoiceId])
+}
+
+model AuditLog {
+  id             String          @id @default(uuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action         AuditAction
+  entityType     AuditEntityType
+  entityId       String
+  metadata       Json?
+  createdAt      DateTime        @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+  @@index([userId])
 }

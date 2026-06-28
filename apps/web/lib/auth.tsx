@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { User } from '@billora/shared';
-import { api, AUTH_EXPIRED_EVENT, clearToken, getToken, setToken } from './api';
+import { api, AUTH_EXPIRED_EVENT, clearToken } from './api';
 
 type AuthContextValue = {
   user: User | null;
@@ -20,11 +20,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refreshUser = useCallback(async () => {
-    if (!getToken()) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
     try {
       setUser(await api.me());
     } catch {
@@ -50,17 +45,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const response = await api.login({ email, password });
-    setToken(response.accessToken);
+    clearToken();
     setUser(response.user);
   }, []);
 
   const register = useCallback(async (fullName: string, email: string, password: string) => {
     const response = await api.register({ fullName, email, password });
-    setToken(response.accessToken);
+    clearToken();
     setUser(response.user);
   }, []);
 
   const logout = useCallback(() => {
+    void api.logout().catch(() => undefined);
     clearToken();
     setUser(null);
   }, []);

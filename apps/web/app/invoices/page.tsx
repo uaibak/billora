@@ -4,10 +4,13 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { Business, Customer, Invoice } from '@billora/shared';
 import { EmptyState } from '../../components/empty-state';
+import { SkeletonList } from '../../components/loading-state';
 import { Message } from '../../components/message';
+import { Pagination } from '../../components/pagination';
 import { ProtectedPage } from '../../components/protected-page';
 import { StatusBadge } from '../../components/status-badge';
-import { api, InvoiceInputItem } from '../../lib/api';
+import { useToast } from '../../components/toast-provider';
+import { api, InvoiceInputItem, PaginationMeta } from '../../lib/api';
 import { confirmAction, getErrorMessage } from '../../lib/errors';
 import { formatMoney, inDays, today } from '../../lib/format';
 import { validateInvoiceItems } from '../../lib/validators';
@@ -15,10 +18,15 @@ import { validateInvoiceItems } from '../../lib/validators';
 const emptyItem: InvoiceInputItem = { description: '', quantity: 1, unitPrice: 0, taxRate: 0 };
 
 export default function Invoices() {
+  const toast = useToast();
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [businessId, setBusinessId] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [meta, setMeta] = useState<PaginationMeta | null>(null);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
   const [customerId, setCustomerId] = useState('');
   const [issueDate, setIssueDate] = useState(today());
   const [dueDate, setDueDate] = useState(inDays(14));
@@ -35,33 +43,40 @@ export default function Invoices() {
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>({});
   const [paymentReferences, setPaymentReferences] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState('');
 
   async function load() {
-    const [businessData, customerData, invoiceData] = await Promise.all([api.businesses(), api.customers(), api.invoices()]);
+    const [businessData, customerData, invoiceData] = await Promise.all([
+      api.businesses(),
+      api.customers(),
+      api.invoicesPaginated({ businessId, search, status: statusFilter, page, limit: 10 }),
+    ]);
     const selectedBusinessId = businessId || businessData[0]?.id || '';
     const selectedCustomerId = customerData.find((customer) => customer.id === customerId && customer.businessId === selectedBusinessId)?.id
       || customerData.find((customer) => customer.businessId === selectedBusinessId)?.id
       || '';
     setBusinesses(businessData);
     setCustomers(customerData);
-    setInvoices(invoiceData);
+    setInvoices(invoiceData.data);
+    setMeta(invoiceData.meta);
     setBusinessId(selectedBusinessId);
     setCustomerId(selectedCustomerId);
   }
 
   useEffect(() => {
     load().catch((err) => setError(getErrorMessage(err, 'Unable to load invoices'))).finally(() => setLoading(false));
-  }, []);
+  }, [businessId, page, search, statusFilter]);
 
   const preview = useMemo(() => {
     const subtotal = items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0), 0);
     const tax = items.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unitPrice || 0) * Number(item.taxRate || 0)) / 100, 0);
     return { subtotal, tax, total: Math.max(subtotal + tax - Number(discountAmount || 0), 0) };
   }, [items, discountAmount]);
+
+  const selectedBusiness = businesses.find((business) => business.id === businessId);
+  const selectedCustomer = customers.find((customer) => customer.id === customerId);
 
   function updateItem(index: number, patch: Partial<InvoiceInputItem>) {
     setItems(items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
@@ -70,7 +85,6 @@ export default function Invoices() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
-    setSuccess('');
     if (!businessId) {
       setError('Create a business profile in settings before creating invoices.');
       return;
@@ -104,10 +118,11 @@ export default function Invoices() {
           taxRate: Number(item.taxRate || 0),
         })),
       });
-      setSuccess('Invoice created.');
+      toast.success('Invoice created.');
       setItems([{ ...emptyItem }]);
       setNotes('');
       setDiscountAmount(0);
+      setPage(1);
       await load();
     } catch (err) {
       setError(getErrorMessage(err, 'Unable to create invoice'));
@@ -118,17 +133,33 @@ export default function Invoices() {
 
   async function invoiceAction(action: () => Promise<unknown>, message: string, id = '') {
     setError('');
-    setSuccess('');
     setBusyId(id);
     try {
-      await action();
-      setSuccess(message);
+      const result = await action();
+      const actionMessage = typeof result === 'string' ? result : message;
+      toast.success(actionMessage);
       await load();
     } catch (err) {
       setError(getErrorMessage(err, 'Invoice action failed'));
     } finally {
       setBusyId('');
     }
+  }
+
+  async function sendInvoice(invoice: Invoice) {
+    await invoiceAction(async () => {
+      const result = await api.sendInvoice(invoice.id);
+      return result.job?.queued ? 'Invoice sent and email job queued.' : result.message;
+    }, 'Invoice marked as sent.', invoice.id);
+    window.setTimeout(() => void load(), 1800);
+  }
+
+  async function generatePdf(invoice: Invoice) {
+    await invoiceAction(async () => {
+      const result = await api.generateInvoicePdf(invoice.id);
+      return result.job?.queued ? 'PDF generation queued.' : result.message;
+    }, 'PDF generation requested.', invoice.id);
+    window.setTimeout(() => void load(), 1800);
   }
 
   function startEdit(invoice: Invoice) {
@@ -196,7 +227,7 @@ export default function Invoices() {
   }
 
   const visibleCustomers = businessId ? customers.filter((customer) => customer.businessId === businessId) : customers;
-  const visibleInvoices = businessId ? invoices.filter((invoice) => invoice.businessId === businessId) : invoices;
+  const visibleInvoices = invoices;
 
   function deleteInvoice(invoice: Invoice) {
     if (!confirmAction(`Delete invoice ${invoice.invoiceNumber}? This cannot be undone.`)) return;
@@ -219,9 +250,22 @@ export default function Invoices() {
           <p>Add line items and Billora will calculate subtotal, tax, discount, and total.</p>
           <form className="stack" onSubmit={onSubmit}>
             <div className="grid two">
+              <div className="card subtle">
+                <p className="eyebrow">From</p>
+                <strong>{selectedBusiness?.name || 'Select a business'}</strong>
+                <p>{[selectedBusiness?.email, selectedBusiness?.city, selectedBusiness?.country].filter(Boolean).join(' · ') || 'Business sender details will appear here.'}</p>
+              </div>
+              <div className="card subtle">
+                <p className="eyebrow">Bill to</p>
+                <strong>{selectedCustomer?.name || 'Select a customer'}</strong>
+                <p>{[selectedCustomer?.email, selectedCustomer?.city, selectedCustomer?.country].filter(Boolean).join(' · ') || 'Customer billing details will appear here.'}</p>
+              </div>
+            </div>
+            <div className="grid two">
               <label>Business
                 <select value={businessId} onChange={(event) => {
                   setBusinessId(event.target.value);
+                  setPage(1);
                   const nextCustomer = customers.find((customer) => customer.businessId === event.target.value);
                   setCustomerId(nextCustomer?.id ?? '');
                 }} required>
@@ -241,13 +285,23 @@ export default function Invoices() {
             </div>
 
             <div className="items">
+              <div className="item-row item-head">
+                <span>Description</span>
+                <span>Qty</span>
+                <span>Unit price</span>
+                <span>Tax %</span>
+                <span>Total</span>
+              </div>
               {items.map((item, index) => (
                 <div className="item-row" key={index}>
                   <input placeholder="Description" value={item.description} onChange={(event) => updateItem(index, { description: event.target.value })} required />
                   <input aria-label="Quantity" type="number" min="0.01" step="0.01" value={item.quantity} onChange={(event) => updateItem(index, { quantity: Number(event.target.value) })} required />
                   <input aria-label="Unit price" type="number" min="0" step="0.01" value={item.unitPrice} onChange={(event) => updateItem(index, { unitPrice: Number(event.target.value) })} required />
                   <input aria-label="Tax rate" type="number" min="0" step="0.01" value={item.taxRate} onChange={(event) => updateItem(index, { taxRate: Number(event.target.value) })} />
-                  <button className="secondary" type="button" onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))} disabled={items.length === 1}>Remove</button>
+                  <span className="line-total">
+                    {formatMoney(Number(item.quantity || 0) * Number(item.unitPrice || 0) * (1 + Number(item.taxRate || 0) / 100))}
+                    <button className="secondary" type="button" onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))} disabled={items.length === 1}>Remove</button>
+                  </span>
                 </div>
               ))}
               <button className="secondary" type="button" onClick={() => setItems([...items, { ...emptyItem }])}>Add item</button>
@@ -259,15 +313,34 @@ export default function Invoices() {
               <span>Tax {formatMoney(preview.tax)}</span>
               <strong>Total {formatMoney(preview.total)}</strong>
             </div>
-            <Message error={error} success={success} />
+            <Message error={error} />
             <button type="submit" disabled={submitting}>{submitting ? 'Creating...' : 'Create invoice'}</button>
           </form>
         </div>
 
         <div className="card">
-          <h2>Invoices</h2>
+          <div className="section-heading">
+            <div>
+              <h2>Invoices</h2>
+              <p>{meta ? `${meta.total} invoice${meta.total === 1 ? '' : 's'} found` : 'Manage invoice records'}</p>
+            </div>
+            <div className="filters">
+              <label>Search<input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Invoice, customer, notes..." /></label>
+              <label>Status
+                <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}>
+                  <option value="">All statuses</option>
+                  <option value="DRAFT">Draft</option>
+                  <option value="SENT">Sent</option>
+                  <option value="PARTIALLY_PAID">Partially paid</option>
+                  <option value="PAID">Paid</option>
+                  <option value="OVERDUE">Overdue</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+              </label>
+            </div>
+          </div>
           <div className="table">
-            {loading && <p className="muted">Loading invoices...</p>}
+            {loading && <SkeletonList rows={5} />}
             {visibleInvoices.map((invoice) => (
               <div className="table-row invoice-row" key={invoice.id}>
                 {editingId === invoice.id ? (
@@ -305,7 +378,8 @@ export default function Invoices() {
                       <input aria-label="Payment amount" className="small-input" type="number" min="0.01" step="0.01" placeholder="Amount" value={paymentAmounts[invoice.id] ?? ''} onChange={(event) => setPaymentAmounts({ ...paymentAmounts, [invoice.id]: event.target.value })} />
                       <input aria-label="Payment reference" className="small-input" placeholder="Reference" value={paymentReferences[invoice.id] ?? ''} onChange={(event) => setPaymentReferences({ ...paymentReferences, [invoice.id]: event.target.value })} />
                       <button className="secondary" type="button" onClick={() => startEdit(invoice)} disabled={Boolean(busyId)}>Edit</button>
-                      <button className="secondary" type="button" onClick={() => void invoiceAction(() => api.sendInvoice(invoice.id), 'Invoice marked as sent.', invoice.id)} disabled={busyId === invoice.id || invoice.status !== 'DRAFT'}>Send</button>
+                      <button className="secondary" type="button" onClick={() => void generatePdf(invoice)} disabled={busyId === invoice.id}>PDF</button>
+                      <button className="secondary" type="button" onClick={() => void sendInvoice(invoice)} disabled={busyId === invoice.id || invoice.status !== 'DRAFT'}>Send</button>
                       <button type="button" onClick={() => void recordPayment(invoice)} disabled={busyId === invoice.id || outstandingTotal(invoice) <= 0}>{busyId === invoice.id ? 'Working...' : 'Pay'}</button>
                       <button className="danger secondary" type="button" onClick={() => deleteInvoice(invoice)} disabled={busyId === invoice.id}>Delete</button>
                     </span>
@@ -315,6 +389,7 @@ export default function Invoices() {
             ))}
             {!loading && !visibleInvoices.length && <EmptyState title="No invoices yet" description="Create an invoice once you have a business and customer." />}
           </div>
+          <Pagination meta={meta} page={page} onPageChange={setPage} />
         </div>
       </section>
     </ProtectedPage>

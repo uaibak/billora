@@ -1,6 +1,7 @@
-import { IsEmail, IsOptional, IsString, IsUrl, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, IsUrl, IsUUID, MinLength } from 'class-validator';
 
 export class CreateBusinessDto {
+  @IsOptional() @IsUUID() organizationId?: string;
   @IsString() @MinLength(2) name: string;
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() @IsString() phone?: string;

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import type { Business, Customer, Invoice } from '@billora/shared';
+import { useEffect, useState } from 'react';
+import type { DashboardSummary } from '@billora/shared';
 import { EmptyState } from '../../components/empty-state';
 import { Message } from '../../components/message';
 import { ProtectedPage } from '../../components/protected-page';
@@ -13,19 +13,14 @@ import { formatMoney } from '../../lib/format';
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [businesses, setBusinesses] = useState<Business[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const [businessData, customerData, invoiceData] = await Promise.all([api.businesses(), api.customers(), api.invoices()]);
-        setBusinesses(businessData);
-        setCustomers(customerData);
-        setInvoices(invoiceData);
+        setSummary(await api.dashboardSummary());
       } catch (err) {
         setError(getErrorMessage(err, 'Unable to load dashboard'));
       } finally {
@@ -35,11 +30,7 @@ export default function Dashboard() {
     void load();
   }, []);
 
-  const totals = useMemo(() => {
-    const paid = invoices.filter((invoice) => invoice.status === 'PAID').reduce((sum, invoice) => sum + Number(invoice.totalAmount), 0);
-    const outstanding = invoices.filter((invoice) => !['PAID', 'CANCELLED'].includes(invoice.status)).reduce((sum, invoice) => sum + Number(invoice.totalAmount), 0);
-    return { paid, outstanding };
-  }, [invoices]);
+  const drafts = summary?.byStatus?.DRAFT ?? 0;
 
   return (
     <ProtectedPage>
@@ -51,23 +42,34 @@ export default function Dashboard() {
           <Message error={error} />
         </div>
         <div className="grid four">
-          <article className="card metric"><span>Businesses</span><strong>{businesses.length}</strong></article>
-          <article className="card metric"><span>Customers</span><strong>{customers.length}</strong></article>
-          <article className="card metric"><span>Invoices</span><strong>{invoices.length}</strong></article>
-          <article className="card metric"><span>Outstanding</span><strong>{formatMoney(totals.outstanding)}</strong></article>
+          <article className="card metric"><span>Businesses</span><strong>{summary?.businesses ?? 0}</strong></article>
+          <article className="card metric"><span>Customers</span><strong>{summary?.customers ?? 0}</strong></article>
+          <article className="card metric"><span>Invoices</span><strong>{summary?.invoices ?? 0}</strong></article>
+          <article className="card metric"><span>Outstanding</span><strong>{formatMoney(summary?.outstanding)}</strong></article>
+        </div>
+        <div className="grid four">
+          <article className="card metric"><span>Collected</span><strong>{formatMoney(summary?.collected)}</strong></article>
+          <article className="card metric"><span>Sent value</span><strong>{formatMoney(summary?.sent)}</strong></article>
+          <article className="card metric"><span>Overdue</span><strong>{formatMoney(summary?.overdue)}</strong></article>
+          <article className="card metric"><span>Drafts</span><strong>{drafts}</strong></article>
         </div>
         <div className="card">
-          <h2>Recent invoices</h2>
+          <div className="section-heading">
+            <div>
+              <h2>Recent invoices</h2>
+              <p>Latest invoices across all businesses.</p>
+            </div>
+          </div>
           <div className="table">
             {loading && <p className="muted">Loading dashboard data...</p>}
-            {invoices.slice(0, 5).map((invoice) => (
+            {summary?.recentInvoices.map((invoice) => (
               <div className="table-row" key={invoice.id}>
-                <span>{invoice.invoiceNumber}</span>
+                <span><strong>{invoice.invoiceNumber}</strong><small>{invoice.customer?.name || invoice.business?.name || 'Invoice'}</small></span>
                 <StatusBadge status={invoice.status} />
                 <strong>{formatMoney(invoice.totalAmount)}</strong>
               </div>
             ))}
-            {!loading && !invoices.length && <EmptyState title="No invoices yet" description="Create your first invoice from the invoices page." />}
+            {!loading && !summary?.recentInvoices.length && <EmptyState title="No invoices yet" description="Create your first invoice from the invoices page." />}
           </div>
         </div>
       </section>

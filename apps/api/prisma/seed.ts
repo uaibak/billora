@@ -1,4 +1,4 @@
-import { InvoiceStatus, PaymentProvider, PaymentStatus, PrismaClient } from '@prisma/client';
+import { InvoiceStatus, OrganizationMemberRole, PaymentProvider, PaymentStatus, PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -9,9 +9,25 @@ async function main() {
     update: { fullName: 'Billora User', passwordHash: await bcrypt.hash('Password123!', 12) },
     create: { email: 'demo@billora.app', fullName: 'Billora User', passwordHash: await bcrypt.hash('Password123!', 12) },
   });
-  await prisma.business.deleteMany({ where: { userId: user.id } });
+  const organization = await prisma.organization.upsert({
+    where: { slug: 'billora-studio' },
+    update: { name: 'Billora Studio', ownerId: user.id },
+    create: {
+      name: 'Billora Studio',
+      slug: 'billora-studio',
+      ownerId: user.id,
+      members: { create: { userId: user.id, role: OrganizationMemberRole.OWNER } },
+    },
+  });
+  await prisma.organizationMember.upsert({
+    where: { organizationId_userId: { organizationId: organization.id, userId: user.id } },
+    update: { role: OrganizationMemberRole.OWNER },
+    create: { organizationId: organization.id, userId: user.id, role: OrganizationMemberRole.OWNER },
+  });
+  await prisma.invoice.deleteMany({ where: { invoiceNumber: { in: ['BIL-2026-000001', 'BIL-2026-000002'] } } });
+  await prisma.business.deleteMany({ where: { organizationId: organization.id } });
   const business = await prisma.business.create({ data: {
-    userId: user.id, name: 'Billora Studio', email: 'billing@billora.app',
+    organizationId: organization.id, name: 'Billora Studio', email: 'billing@billora.app',
     phone: '+92 300 0000000', city: 'Karachi', country: 'Pakistan', taxNumber: 'DEMO-TAX-001',
   } });
   const [acme, northstar] = await Promise.all([
@@ -35,7 +51,7 @@ async function main() {
   } });
   await prisma.payment.create({ data: {
     invoiceId: first.id, amount: 500, provider: PaymentProvider.MANUAL, status: PaymentStatus.SUCCESS,
-    providerReference: 'DEMO-CASH-001', paidAt: new Date('2026-06-10'),
+    providerReference: 'TEST-CASH-001', paidAt: new Date('2026-06-10'),
   } });
   console.log('Seeded test user: demo@billora.app / Password123!');
 }
